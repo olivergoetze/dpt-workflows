@@ -23,9 +23,41 @@ import time
 import subprocess
 
 
-# TODO: Abholen der Daten vom FTP-Server (aus trigger_flow_process.py adaptieren)
-
 # TODO: FTP-Zugangsdaten als Prefect-Secret hinterlegen
+
+@task(name="fetch_transformation_job_data")
+def fetch_transformation_job_data(transformation_job_source_path, transformation_job_source_file):
+    """Quelldaten für den Transformations-Job herunterladen und in temporärem Verzeichnis bereitstellen."""
+    load_dotenv()
+    root_path = os.path.abspath(".")
+    source_path = None
+
+    with ftplib.FTP(os.getenv("DDB_FTP_SERVER")) as ftp:
+        ftp.login(user=os.getenv("DDB_FTP_USER"), passwd=os.getenv("DDB_FTP_PWD"))
+        ftp.cwd(transformation_job_source_path)
+
+        ftp_listdir = []
+        try:
+            ftp_listdir = ftp.nlst()
+        except ftplib.error_perm:
+            # Exception bei leerem Ordner abfangen.
+            pass
+
+        if transformation_job_source_file in ftp_listdir:
+            temp_dir_uuid = str(uuid4().hex)
+            temp_dir_path = "temp_dir/{}".format(temp_dir_uuid)
+            os.makedirs(temp_dir_path)
+
+            with open("{}/{}".format(temp_dir_path, transformation_job_source_file), "wb") as output_file:
+                ftp.retrbinary('RETR ' + transformation_job_source_file, output_file.write, 1024)
+                ftp.sendcmd("RNFR {}".format(transformation_job_source_file))
+                ftp.sendcmd("RNTO {}.processed".format(
+                    transformation_job_source_file))  # Endung .processed anfügen, damit hochgeladene Lieferungen nicht mehrfach prozessiert werden.
+
+            source_path = {"source_path": transformation_job_source_path, "temp_dir": temp_dir_path,
+                           "root_path": root_path}
+
+    return source_path
 
 
 @task(name="prepare_working_directory")
@@ -78,6 +110,7 @@ def prepare_dpt_instance(working_dir_path, dpt_source_path):
 
 @task(name="update_dpt_instance")
 def update_dpt_instance(dpt_instance_path, paths):
+    """DPT-Instanz im Working-Directory per 'git pull' aktualisieren."""
     logger = prefect.context.get("logger")
     root_path = paths["root_path"]
 
@@ -93,7 +126,7 @@ def update_dpt_instance(dpt_instance_path, paths):
 def get_transformation_job_data(working_dir_path, dpt_instance_path, dpt_instance_update_result, paths):
     """Daten für den Transformationsjob: data_input.zip mit ISIL-Ordner, der Daten inkl. provider.xml enthält.
 
-    Aus Temp-Ordner herunterladen und in Working-Directory entpacken.
+    Aus Temp-Directory in Working-Directory kopieren entpacken.
     """
     session_data = collections.OrderedDict()
     temp_dir_path = paths["temp_dir"]
@@ -268,8 +301,10 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
 # with Flow(name="DPT-Transformation Testing", state_handlers=[slack_notifier], executor=LocalDaskExecutor()) as flow:
 with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as flow:
     dpt_source = Parameter("dpt_source", default="dpt_core")
-    path_dict = Parameter("transformation_job_paths", default="/Fachstelle_Archiv/datapreparationcloud")
+    transformation_job_source_path = Parameter("transformation_job_source_path", default="/Fachstelle_Archiv/datapreparationcloud")
+    transformation_job_source_file = Parameter("transformation_job_source_file", default="DE_1983.zip")
 
+    path_dict = fetch_transformation_job_data(transformation_job_source_path, transformation_job_source_file)
     working_dir = prepare_working_dir(path_dict)
     dpt_instance = prepare_dpt_instance(working_dir, dpt_source)
     dpt_instance_update_result = update_dpt_instance(dpt_instance, path_dict)
