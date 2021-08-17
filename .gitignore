@@ -130,3 +130,6 @@ dmypy.json
 
 # Jetbrains-specific
 .idea/
+
+temp_dir/
+working_dir/
