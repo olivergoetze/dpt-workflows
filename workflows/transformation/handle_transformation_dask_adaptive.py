@@ -8,6 +8,7 @@ from prefect.executors import DaskExecutor
 from prefect.run_configs import KubernetesRun
 from prefect.backend import FlowRunView
 from prefect.storage import GitHub
+from dask_kubernetes import KubeCluster, make_pod_spec
 
 import os
 import sys
@@ -298,7 +299,16 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
             logger.debug("Cleanup-Directory '{}' entfernt.".format(cleanup_path))
 
 
-with Flow(name="DPT-Transformation Testing Dask Adaptive", executor=DaskExecutor(cluster_class="dask_kubernetes.KubeCluster", cluster_kwargs={"n_workers": 4, "image": "ghcr.io/olivergoetze/dpt-core-test:latest"}, adapt_kwargs={"maximum": 4})) as flow:
+pod_spec = make_pod_spec(
+    image="daskdev/dask:latest",
+    memory_limit="4G",
+    memory_request="4G",
+    cpu_limit=1,
+    cpu_request=1,
+    env={"EXTRA_PIP_PACKAGES": "prefect"},
+)
+
+with Flow(name="DPT-Transformation Testing Dask Adaptive", executor=DaskExecutor(cluster_class="dask_kubernetes.KubeCluster", cluster_kwargs={"n_workers": 4, "pod_template": pod_spec}, adapt_kwargs={"maximum": 4})) as flow:
     dpt_source = Parameter("dpt_source", default="dpt_core")
     transformation_job_source_path = Parameter("transformation_job_source_path", default="/Fachstelle_Archiv/datapreparationcloud")
     transformation_job_source_file = Parameter("transformation_job_source_file", default="DE_1983.zip")
