@@ -317,9 +317,13 @@ with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as fl
 
 flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation.py")
 
-with open("config/k8s_job_template_handle_transformation.yaml") as f:
-    job_template_dict = yaml.safe_load(f)
-flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core-test:latest", job_template=job_template_dict)
+job_template_file_path = "config/k8s_job_template_handle_transformation.yaml"
+if os.path.isfile(job_template_file_path):
+    with open(job_template_file_path) as f:
+        job_template = yaml.safe_load(f)
+else:
+    job_template = {'apiVersion': 'batch/v1', 'kind': 'Job', 'spec': {'template': {'spec': {'containers': [{'name': 'flow', 'env': [{'name': 'DDB_FTP_SERVER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_SERVER'}}}, {'name': 'DDB_FTP_USER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_USER'}}}, {'name': 'DDB_FTP_PWD', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_PWD'}}}]}]}}}}
+flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core-test:latest", job_template=job_template)
 
 flow.set_reference_tasks([transformation_result_upload])
 c = Client()
