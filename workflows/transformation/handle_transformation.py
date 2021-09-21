@@ -21,9 +21,8 @@ from zipfile import ZipFile
 from dotenv import load_dotenv
 import time
 import subprocess
+import yaml
 
-
-# TODO: FTP-Zugangsdaten als Prefect-Secret hinterlegen
 
 @task(name="fetch_transformation_job_data")
 def fetch_transformation_job_data(transformation_job_source_path, transformation_job_source_file):
@@ -317,7 +316,10 @@ with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as fl
 
 
 flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation.py")
-flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core-test:latest")
+
+with open("config/k8s_job_template_handle_transformation.yaml") as f:
+    job_template_dict = yaml.safe_load(f)
+flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core-test:latest", job_template=job_template_dict)
 
 flow.set_reference_tasks([transformation_result_upload])
 c = Client()

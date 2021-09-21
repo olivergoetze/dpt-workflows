@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+spec:
+  template:
+    spec:
+      containers:
+        - name: flow
+          env:
+            - name: DDB_FTP_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: ddbftp-credentials
+                  key: DDB_FTP_SERVER
+            - name: DDB_FTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ddbftp-credentials
+                  key: DDB_FTP_USER
+            - name: DDB_FTP_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: ddbftp-credentials
+                  key: DDB_FTP_PWD
