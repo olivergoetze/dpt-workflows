@@ -329,7 +329,7 @@ with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as fl
     working_dir = prepare_working_dir(path_dict)
     dpt_instance = prepare_dpt_instance(working_dir, dpt_source)
     dpt_instance_update_result = update_dpt_instance(dpt_instance, path_dict)
-    provider_script_repo_fetch_result = fetch_provider_script_repository.map(provider_script_repositories=provider_script_repositories, dpt_instance_path=unmapped(dpt_instance), dpt_instance_update_result=unmapped(dpt_instance_update_result), paths=unmapped(path_dict))
+    provider_script_repo_fetch_result = fetch_provider_script_repository.map(provider_script_repository=provider_script_repositories, dpt_instance_path=unmapped(dpt_instance), dpt_instance_update_result=unmapped(dpt_instance_update_result), paths=unmapped(path_dict))
     transformation_job_data = get_transformation_job_data(working_dir, dpt_instance, dpt_instance_update_result, path_dict)
     transformation_result = handle_transformation_run(transformation_job_data, dpt_instance)
     monitoring_result = monitor_transformation_run(transformation_job_data, dpt_instance, path_dict)
