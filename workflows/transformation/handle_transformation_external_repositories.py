@@ -143,7 +143,7 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
     os.chdir(root_path)
 
 @task(name="get_transformation_job_data")
-def get_transformation_job_data(working_dir_path, dpt_instance_path, dpt_instance_update_result, paths):
+def get_transformation_job_data(working_dir_path, dpt_instance_path, dpt_instance_update_result, paths, provider_script_repo_fetch_result):
     """Daten für den Transformationsjob: data_input.zip mit ISIL-Ordner, der Daten inkl. provider.xml enthält.
 
     Aus Temp-Directory in Working-Directory kopieren entpacken.
@@ -319,7 +319,7 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
 
 
 # with Flow(name="DPT-Transformation Testing", state_handlers=[slack_notifier], executor=LocalDaskExecutor()) as flow:
-with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as flow:
+with Flow(name="DPT-Transformation Testing External Repositories", executor=LocalDaskExecutor()) as flow:
     dpt_source = Parameter("dpt_source", default="dpt_core")
     provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts", "olivergoetze/dpt-core-test", "olivergoetze/ddbmappings", "olivergoetze/dpt-kubernetes-secrets"])
     transformation_job_source_path = Parameter("transformation_job_source_path", default="/Fachstelle_Archiv/datapreparationcloud")
@@ -330,7 +330,7 @@ with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as fl
     dpt_instance = prepare_dpt_instance(working_dir, dpt_source)
     dpt_instance_update_result = update_dpt_instance(dpt_instance, path_dict)
     provider_script_repo_fetch_result = fetch_provider_script_repository.map(provider_script_repository=provider_script_repositories, dpt_instance_path=unmapped(dpt_instance), dpt_instance_update_result=unmapped(dpt_instance_update_result), paths=unmapped(path_dict))
-    transformation_job_data = get_transformation_job_data(working_dir, dpt_instance, dpt_instance_update_result, path_dict)
+    transformation_job_data = get_transformation_job_data(working_dir, dpt_instance, dpt_instance_update_result, path_dict, provider_script_repo_fetch_result)
     transformation_result = handle_transformation_run(transformation_job_data, dpt_instance)
     monitoring_result = monitor_transformation_run(transformation_job_data, dpt_instance, path_dict)
     transformation_result_upload = upload_transformation_job_result(transformation_result, path_dict, dpt_instance, transformation_job_data)
@@ -355,4 +355,4 @@ try:
 except prefect.utilities.exceptions.ClientError:
     # Fehler abfangen, für den Fall, dass das Projekt bereits exisitiert.
     pass
-flow.register(project_name="dpt", version_group_id="dpt_testing")
+flow.register(project_name="dpt", version_group_id="dpt_testing_external_repositories")
