@@ -137,7 +137,7 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
     normalized_repo_path = "provider_script_repositories/{}".format(normalized_repo_name)
     os.makedirs(normalized_repo_path)
 
-    provider_script_repository_url = "https://{}:{}@github.com/{}".format(os.getenv("GITHUB_REPO_USER_{}".format(normalized_repo_name)), os.getenv("GITHUB_REPO_TOKEN_{}".format(normalized_repo_name)), provider_script_repository)
+    provider_script_repository_url = "https://{}:{}@github.com/{}".format(os.getenv("GITHUB_REPO_USER"), os.getenv("GITHUB_REPO_TOKEN"), provider_script_repository)
     logger.info(subprocess.run(['git', 'clone', provider_script_repository_url, normalized_repo_path], stdout=subprocess.PIPE).stdout.decode('utf-8'))
 
     os.chdir(root_path)
@@ -321,7 +321,7 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
 # with Flow(name="DPT-Transformation Testing", state_handlers=[slack_notifier], executor=LocalDaskExecutor()) as flow:
 with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as flow:
     dpt_source = Parameter("dpt_source", default="dpt_core")
-    provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts"])
+    provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts", "olivergoetze/dpt-core-test", "olivergoetze/ddbmappings", "olivergoetze/dpt-kubernetes-secrets"])
     transformation_job_source_path = Parameter("transformation_job_source_path", default="/Fachstelle_Archiv/datapreparationcloud")
     transformation_job_source_file = Parameter("transformation_job_source_file", default="DE_1983.zip")
 
@@ -340,12 +340,12 @@ with Flow(name="DPT-Transformation Testing", executor=LocalDaskExecutor()) as fl
 
 flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation.py")
 
-job_template_file_path = "config/k8s_job_template_handle_transformation.yaml"
+job_template_file_path = "config/k8s_job_template_handle_transformation_external_repositories.yaml"
 if os.path.isfile(job_template_file_path):
     with open(job_template_file_path) as f:
         job_template = yaml.safe_load(f)
 else:
-    job_template = {'apiVersion': 'batch/v1', 'kind': 'Job', 'spec': {'template': {'spec': {'containers': [{'name': 'flow', 'env': [{'name': 'DDB_FTP_SERVER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_SERVER'}}}, {'name': 'DDB_FTP_USER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_USER'}}}, {'name': 'DDB_FTP_PWD', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_PWD'}}}]}]}}}}
+    job_template = {'apiVersion': 'batch/v1', 'kind': 'Job', 'spec': {'template': {'spec': {'containers': [{'name': 'flow', 'env': [{'name': 'DDB_FTP_SERVER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_SERVER'}}}, {'name': 'DDB_FTP_USER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_USER'}}}, {'name': 'DDB_FTP_PWD', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_PWD'}}}, {'name': 'GITHUB_REPO_USER', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_USER'}}}, {'name': 'GITHUB_REPO_TOKEN', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_TOKEN'}}}]}]}}}}
 flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core-test:latest", job_template=job_template)
 
 flow.set_reference_tasks([transformation_result_upload])
