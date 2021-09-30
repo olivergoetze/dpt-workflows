@@ -129,6 +129,11 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
     logger = prefect.context.get("logger")
     root_path = paths["root_path"]
 
+    logger.info("CWD: {}".format(os.getcwd()))
+    logger.info("root_path: {}".format(root_path))
+    logger.info("dpt_instance_path: {}".format(dpt_instance_path))
+    time.sleep(10)
+    
     # Wechsel ins working_dir-Verzeichnis
     os.chdir(dpt_instance_path)
     os.chdir("..")
