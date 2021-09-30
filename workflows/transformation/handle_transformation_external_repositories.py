@@ -132,6 +132,8 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
     logger.info("CWD: {}".format(os.getcwd()))
     logger.info("root_path: {}".format(root_path))
     logger.info("dpt_instance_path: {}".format(dpt_instance_path))
+    logger.info("provider_script_repository: {}".format(provider_script_repository))
+    logger.info("paths: {}".format(paths))
     time.sleep(10)
 
     # Wechsel ins working_dir-Verzeichnis
@@ -318,9 +320,9 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
         cleanup_paths.append(working_dir)
     for cleanup_path in tuple(cleanup_paths):
         if os.path.isdir(cleanup_path):
-            # shutil.rmtree(cleanup_path)
+            shutil.rmtree(cleanup_path)
 
-            logger.info("Cleanup-Directory '{}' entfernt.".format(cleanup_path))
+            logger.debug("Cleanup-Directory '{}' entfernt.".format(cleanup_path))
 
 
 # with Flow(name="DPT-Transformation Testing", state_handlers=[slack_notifier], executor=LocalDaskExecutor()) as flow:
