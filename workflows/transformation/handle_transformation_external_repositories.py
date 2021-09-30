@@ -127,19 +127,14 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
     """Providerskripte aus übergebenen Repositories auschecken."""
     load_dotenv()
     logger = prefect.context.get("logger")
-    root_path = paths["root_path"]
 
-    # Wechsel ins working_dir-Verzeichnis
-    os.chdir(dpt_instance_path)
-    os.chdir("..")
-
-    normalized_repo_path = provider_script_repository.replace("-", "_")
+    normalized_repo_path = "{}/{}".format("/".join(dpt_instance_path.split("/")[:-1]), provider_script_repository.replace("-", "_"))
+    logger.debug("normalized_repo_path: {}".format(normalized_repo_path))
     os.makedirs(normalized_repo_path)
 
     provider_script_repository_url = "https://{}:{}@github.com/{}".format(os.getenv("GITHUB_REPO_USER"), os.getenv("GITHUB_REPO_TOKEN"), provider_script_repository)
     logger.info(subprocess.run(['git', 'clone', provider_script_repository_url, normalized_repo_path], stdout=subprocess.PIPE).stdout.decode('utf-8'))
 
-    os.chdir(root_path)
 
 @task(name="get_transformation_job_data")
 def get_transformation_job_data(working_dir_path, dpt_instance_path, dpt_instance_update_result, paths, provider_script_repo_fetch_result):
