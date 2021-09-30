@@ -129,21 +129,11 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
     logger = prefect.context.get("logger")
     root_path = paths["root_path"]
 
-    logger.info("CWD: {}".format(os.getcwd()))
-    logger.info("root_path: {}".format(root_path))
-    logger.info("dpt_instance_path: {}".format(dpt_instance_path))
-    logger.info("provider_script_repository: {}".format(provider_script_repository))
-    logger.info("paths: {}".format(paths))
-    logger.info("Path exists: {} - {}".format(dpt_instance_path, os.path.isdir(dpt_instance_path)))
-    logger.info("Path exists: {} - {}".format(dpt_instance_path.replace("/ddbmappings", ""), os.path.isdir(dpt_instance_path.replace("/ddbmappings", ""))))
-    time.sleep(10)
-
     # Wechsel ins working_dir-Verzeichnis
     os.chdir(dpt_instance_path)
     os.chdir("..")
 
-    normalized_repo_name = provider_script_repository.replace("-", "_")
-    normalized_repo_path = "provider_script_repositories/{}".format(normalized_repo_name)
+    normalized_repo_path = provider_script_repository.replace("-", "_")
     os.makedirs(normalized_repo_path)
 
     provider_script_repository_url = "https://{}:{}@github.com/{}".format(os.getenv("GITHUB_REPO_USER"), os.getenv("GITHUB_REPO_TOKEN"), provider_script_repository)
