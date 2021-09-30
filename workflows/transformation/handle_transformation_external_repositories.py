@@ -134,6 +134,8 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
     logger.info("dpt_instance_path: {}".format(dpt_instance_path))
     logger.info("provider_script_repository: {}".format(provider_script_repository))
     logger.info("paths: {}".format(paths))
+    logger.info("Path exists: {} - {}".format(dpt_instance_path, os.path.isdir(dpt_instance_path)))
+    logger.info("Path exists: {} - {}".format(dpt_instance_path.replace("/ddbmappings", ""), os.path.isdir(dpt_instance_path.replace("/ddbmappings", ""))))
     time.sleep(10)
 
     # Wechsel ins working_dir-Verzeichnis
