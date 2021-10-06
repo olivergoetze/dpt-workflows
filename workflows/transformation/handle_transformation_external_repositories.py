@@ -315,7 +315,7 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
 # with Flow(name="DPT-Transformation Testing", state_handlers=[slack_notifier], executor=LocalDaskExecutor()) as flow:
 with Flow(name="DPT-Transformation Testing External Repositories", executor=LocalDaskExecutor()) as flow:
     dpt_source = Parameter("dpt_source", default="dpt_core")
-    provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts", "olivergoetze/dpt-core-test", "olivergoetze/ddbmappings", "olivergoetze/dpt-kubernetes-secrets"])
+    provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts"])
     transformation_job_source_path = Parameter("transformation_job_source_path", default="/Fachstelle_Archiv/datapreparationcloud")
     transformation_job_source_file = Parameter("transformation_job_source_file", default="DE_1983.zip")
 
