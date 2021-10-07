@@ -122,8 +122,23 @@ def update_dpt_instance(dpt_instance_path, paths):
         logger.warning("DPT-Source-Repository '{}' existiert nicht.".format(dpt_instance_path))
 
 
+@task(name="fetch_additional_python_dependencies")
+def fetch_python_dependencies(python_dependencies, dpt_instance_path, dpt_instance_update_result, paths):
+    """Als Parameter (Liste) übergebene Python-Dependencies über 'pip install' bereitstellen."""
+    load_dotenv()
+    logger = prefect.context.get("logger")
+
+    if len(python_dependencies) > 0:
+        logger.info("Zusätzlich zu installierende Python-Pakete: {}".format("; ".join(python_dependencies)))
+
+    for dependency in python_dependencies:
+        subprocess.run(['pip', 'install', dependency])
+
+    logger.info("Installierte Python-Pakete:\n{}".format(subprocess.run(['pip', 'freeze'], stdout=subprocess.PIPE).stdout.decode('utf-8')))
+
+
 @task(name="fetch_provider_script_repository")
-def fetch_provider_script_repository(provider_script_repository, dpt_instance_path, dpt_instance_update_result, paths):
+def fetch_provider_script_repository(provider_script_repository, dpt_instance_path, dpt_instance_update_result, paths, python_dependencies_fetch_result):
     """Providerskripte aus übergebenen Repositories auschecken."""
     load_dotenv()
     logger = prefect.context.get("logger")
@@ -316,6 +331,7 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
 with Flow(name="DPT-Transformation Testing External Repositories", executor=LocalDaskExecutor()) as flow:
     dpt_source = Parameter("dpt_source", default="dpt_core")
     provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts"])
+    python_dependencies = Parameter("additional_python_dependencies", default=[])
     transformation_job_source_path = Parameter("transformation_job_source_path", default="/Fachstelle_Archiv/datapreparationcloud")
     transformation_job_source_file = Parameter("transformation_job_source_file", default="DE_1983.zip")
 
@@ -323,7 +339,8 @@ with Flow(name="DPT-Transformation Testing External Repositories", executor=Loca
     working_dir = prepare_working_dir(path_dict)
     dpt_instance = prepare_dpt_instance(working_dir, dpt_source)
     dpt_instance_update_result = update_dpt_instance(dpt_instance, path_dict)
-    provider_script_repo_fetch_result = fetch_provider_script_repository.map(provider_script_repository=provider_script_repositories, dpt_instance_path=unmapped(dpt_instance), dpt_instance_update_result=unmapped(dpt_instance_update_result), paths=unmapped(path_dict))
+    python_dependencies_fetch_result = fetch_python_dependencies(python_dependencies, dpt_instance, dpt_instance_update_result, path_dict)
+    provider_script_repo_fetch_result = fetch_provider_script_repository.map(provider_script_repository=provider_script_repositories, dpt_instance_path=unmapped(dpt_instance), dpt_instance_update_result=unmapped(dpt_instance_update_result), paths=unmapped(path_dict), python_dependencies_fetch_result=unmapped(python_dependencies_fetch_result))
     transformation_job_data = get_transformation_job_data(working_dir, dpt_instance, dpt_instance_update_result, path_dict, provider_script_repo_fetch_result)
     transformation_result = handle_transformation_run(transformation_job_data, dpt_instance)
     monitoring_result = monitor_transformation_run(transformation_job_data, dpt_instance, path_dict)
