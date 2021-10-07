@@ -4,7 +4,6 @@ from prefect import Flow
 from prefect import unmapped
 from prefect import Parameter
 from prefect import Client
-from prefect.utilities.notifications import slack_notifier
 from prefect.executors import LocalDaskExecutor
 from prefect.run_configs import KubernetesRun
 from prefect.backend import FlowRunView
@@ -64,7 +63,6 @@ def fetch_transformation_job_data(transformation_job_source_path, transformation
 def prepare_working_dir(paths):
     """Vorbereiten des Working-Directories"""
     logger = prefect.context.get("logger")
-    # transformation_job_source_path = paths["source_path"]
 
     working_dir_uuid = str(uuid4().hex)
     working_dir_path = "working_dir/{}".format(working_dir_uuid)
@@ -90,8 +88,6 @@ def prepare_dpt_instance(working_dir_path, dpt_source_path):
     # __init__.py-Datei anlegen, damit DPT-Module importiert werden können.
     with open("{}/__init__.py".format(dpt_instance_path), mode="a"):
         pass
-
-    # os.makedirs("{}/data_input".format(dpt_instance_path))  # data_input-Verzeichnis anlegen.
 
     sys.path.append(dpt_instance_path_abs)
     module_name = "handle_session_data.py"
@@ -122,8 +118,8 @@ def update_dpt_instance(dpt_instance_path, paths):
         logger.warning("DPT-Source-Repository '{}' existiert nicht.".format(dpt_instance_path))
 
 
-@task(name="fetch_additional_python_dependencies")
-def fetch_python_dependencies(python_dependencies, dpt_instance_path, dpt_instance_update_result, paths):
+@task(name="fetch_python_dependencies")
+def fetch_python_dependencies(python_dependencies, dpt_instance_update_result):
     """Als Parameter (Liste) übergebene Python-Dependencies über 'pip install' bereitstellen."""
     load_dotenv()
     logger = prefect.context.get("logger")
@@ -138,7 +134,7 @@ def fetch_python_dependencies(python_dependencies, dpt_instance_path, dpt_instan
 
 
 @task(name="fetch_provider_script_repository")
-def fetch_provider_script_repository(provider_script_repository, dpt_instance_path, dpt_instance_update_result, paths, python_dependencies_fetch_result):
+def fetch_provider_script_repository(provider_script_repository, dpt_instance_path, python_dependencies_fetch_result):
     """Providerskripte aus übergebenen Repositories auschecken."""
     load_dotenv()
     logger = prefect.context.get("logger")
@@ -152,10 +148,10 @@ def fetch_provider_script_repository(provider_script_repository, dpt_instance_pa
 
 
 @task(name="get_transformation_job_data")
-def get_transformation_job_data(working_dir_path, dpt_instance_path, dpt_instance_update_result, paths, provider_script_repo_fetch_result):
+def get_transformation_job_data(dpt_instance_path, paths, provider_script_repo_fetch_result):
     """Daten für den Transformationsjob: data_input.zip mit ISIL-Ordner, der Daten inkl. provider.xml enthält.
 
-    Aus Temp-Directory in Working-Directory kopieren entpacken.
+    Aus Temp-Directory in Working-Directory kopieren und entpacken.
     """
     session_data = collections.OrderedDict()
     temp_dir_path = paths["temp_dir"]
@@ -327,7 +323,6 @@ def cleanup_working_dir(transformation_result_upload, paths, working_dir):
             logger.debug("Cleanup-Directory '{}' entfernt.".format(cleanup_path))
 
 
-# with Flow(name="DPT-Transformation Testing", state_handlers=[slack_notifier], executor=LocalDaskExecutor()) as flow:
 with Flow(name="DPT-Transformation Testing External Repositories", executor=LocalDaskExecutor()) as flow:
     dpt_source = Parameter("dpt_source", default="dpt_core")
     provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts"])
@@ -339,9 +334,9 @@ with Flow(name="DPT-Transformation Testing External Repositories", executor=Loca
     working_dir = prepare_working_dir(path_dict)
     dpt_instance = prepare_dpt_instance(working_dir, dpt_source)
     dpt_instance_update_result = update_dpt_instance(dpt_instance, path_dict)
-    python_dependencies_fetch_result = fetch_python_dependencies(python_dependencies, dpt_instance, dpt_instance_update_result, path_dict)
-    provider_script_repo_fetch_result = fetch_provider_script_repository.map(provider_script_repository=provider_script_repositories, dpt_instance_path=unmapped(dpt_instance), dpt_instance_update_result=unmapped(dpt_instance_update_result), paths=unmapped(path_dict), python_dependencies_fetch_result=unmapped(python_dependencies_fetch_result))
-    transformation_job_data = get_transformation_job_data(working_dir, dpt_instance, dpt_instance_update_result, path_dict, provider_script_repo_fetch_result)
+    python_dependencies_fetch_result = fetch_python_dependencies(python_dependencies, dpt_instance_update_result)
+    provider_script_repo_fetch_result = fetch_provider_script_repository.map(provider_script_repository=provider_script_repositories, dpt_instance_path=unmapped(dpt_instance), python_dependencies_fetch_result=unmapped(python_dependencies_fetch_result))
+    transformation_job_data = get_transformation_job_data(dpt_instance, path_dict, provider_script_repo_fetch_result)
     transformation_result = handle_transformation_run(transformation_job_data, dpt_instance)
     monitoring_result = monitor_transformation_run(transformation_job_data, dpt_instance, path_dict)
     transformation_result_upload = upload_transformation_job_result(transformation_result, path_dict, dpt_instance, transformation_job_data)
