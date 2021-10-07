@@ -340,7 +340,7 @@ if os.path.isfile(job_template_file_path):
         job_template = yaml.safe_load(f)
 else:
     job_template = {'apiVersion': 'batch/v1', 'kind': 'Job', 'spec': {'template': {'spec': {'containers': [{'name': 'flow', 'env': [{'name': 'DDB_FTP_SERVER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_SERVER'}}}, {'name': 'DDB_FTP_USER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_USER'}}}, {'name': 'DDB_FTP_PWD', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_PWD'}}}, {'name': 'GITHUB_REPO_USER', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_USER'}}}, {'name': 'GITHUB_REPO_TOKEN', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_TOKEN'}}}]}]}}}}
-flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core-test:latest", job_template=job_template)
+flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core:latest", job_template=job_template)
 
 flow.set_reference_tasks([transformation_result_upload])
 c = Client()

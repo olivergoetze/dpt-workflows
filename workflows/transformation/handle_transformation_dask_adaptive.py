@@ -326,7 +326,7 @@ with Flow(name="DPT-Transformation Testing Dask Adaptive", executor=DaskExecutor
 
 
 flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation_dask_adaptive.py")
-flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core-test:latest")
+flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core:latest")
 
 flow.set_reference_tasks([transformation_result_upload])
 c = Client()
