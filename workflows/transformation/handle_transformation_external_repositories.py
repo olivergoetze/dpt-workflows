@@ -272,9 +272,10 @@ def upload_transformation_job_result(transformation_job_result, paths, dpt_insta
 
     provider_isil = transformation_job_data["provider"]
     transformation_job_result_folder = provider_isil.replace("-", "_")
-    transformation_job_result_file = "{}.zip".format(transformation_job_result_folder)
+    transformation_job_result_folder_unique = "{}_{}".format(transformation_job_result_folder, str(uuid4().hex)[:8])
+    transformation_job_result_file = "{}.zip".format(transformation_job_result_folder_unique)
 
-    shutil.make_archive(transformation_job_result_folder, "zip", transformation_job_result_folder)
+    shutil.make_archive(transformation_job_result_folder_unique, "zip", transformation_job_result_folder)
 
     transformation_job_source_path = paths["source_path"]
     with ftplib.FTP(os.getenv("DDB_FTP_SERVER")) as ftp:
