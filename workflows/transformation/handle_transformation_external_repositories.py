@@ -49,9 +49,9 @@ def fetch_transformation_job_data(transformation_job_source_path, transformation
 
             with open("{}/{}".format(temp_dir_path, transformation_job_source_file), "wb") as output_file:
                 ftp.retrbinary('RETR ' + transformation_job_source_file, output_file.write, 1024)
-                ftp.sendcmd("RNFR {}".format(transformation_job_source_file))
-                ftp.sendcmd("RNTO {}.processed".format(
-                    transformation_job_source_file))  # Endung .processed anfügen, damit hochgeladene Lieferungen nicht mehrfach prozessiert werden.
+                # ftp.sendcmd("RNFR {}".format(transformation_job_source_file))
+                # ftp.sendcmd("RNTO {}.processed".format(
+                #     transformation_job_source_file))  # Endung .processed anfügen, damit hochgeladene Lieferungen nicht mehrfach prozessiert werden.
 
             source_path = {"source_path": transformation_job_source_path, "temp_dir": temp_dir_path,
                            "root_path": root_path}
