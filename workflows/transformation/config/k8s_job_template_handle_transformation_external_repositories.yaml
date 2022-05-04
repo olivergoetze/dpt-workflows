@@ -31,3 +31,8 @@ spec:
                 secretKeyRef:
                   name: github-repo-credentials
                   key: GITHUB_REPO_TOKEN
+            - name: PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-repo-credentials
+                  key: PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN
