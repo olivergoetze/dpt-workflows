@@ -346,7 +346,7 @@ with Flow(name="DPT-Transformation Testing External Repositories", executor=Loca
     cleanup_dir = cleanup_working_dir(transformation_result_upload, path_dict, working_dir)
 
 
-flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation_external_repositories.py", access_token_secret=Secret("GITHUB_STORAGE_ACCESS_TOKEN").get())
+flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation_external_repositories.py", access_token_secret="GITHUB_STORAGE_ACCESS_TOKEN")
 
 job_template_file_path = "config/k8s_job_template_handle_transformation_external_repositories.yaml"
 if os.path.isfile(job_template_file_path):
