@@ -7,7 +7,8 @@ from prefect import Client
 from prefect.executors import LocalDaskExecutor
 from prefect.run_configs import KubernetesRun
 from prefect.backend import FlowRunView
-from prefect.storage import GitHub
+# from prefect.storage import GitHub
+from prefect.storage import S3
 from prefect.client import Secret
 
 import os
@@ -346,7 +347,9 @@ with Flow(name="DPT-Transformation Testing External Repositories", executor=Loca
     cleanup_dir = cleanup_working_dir(transformation_result_upload, path_dict, working_dir)
 
 
-flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation_external_repositories.py", access_token_secret="GITHUB_STORAGE_ACCESS_TOKEN")
+# flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation_external_repositories.py", access_token_secret="GITHUB_STORAGE_ACCESS_TOKEN")
+load_dotenv()
+flow.storage = S3(bucket="dpt-prefect-flow-storage", key="workflows/transformation/handle_transformation_external_repositories.py", stored_as_script=True, client_options={'endpoint_url': os.getenv('MINIO_ENDPOINT_URL'), 'aws_access_key_id': os.getenv('MINIO_ACCESS_KEY'), 'aws_secret_access_key': os.getenv('MINIO_SECRET_KEY')})
 
 job_template_file_path = "config/k8s_job_template_handle_transformation_external_repositories.yaml"
 if os.path.isfile(job_template_file_path):
