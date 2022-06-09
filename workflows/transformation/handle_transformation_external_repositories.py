@@ -9,7 +9,7 @@ from prefect.run_configs import KubernetesRun
 from prefect.backend import FlowRunView
 # from prefect.storage import GitHub
 from prefect.storage import S3
-from prefect.client import Secret
+from prefect.engine.results import S3Result
 
 import os
 import sys
@@ -31,32 +31,23 @@ def fetch_transformation_job_data(transformation_job_source_path, transformation
     """Quelldaten für den Transformations-Job herunterladen und in temporärem Verzeichnis bereitstellen."""
     load_dotenv()
     root_path = os.path.abspath(".")
-    source_path = None
 
-    with ftplib.FTP(os.getenv("DDB_FTP_SERVER")) as ftp:
-        ftp.login(user=os.getenv("DDB_FTP_USER"), passwd=os.getenv("DDB_FTP_PWD"))
-        ftp.cwd(transformation_job_source_path)
+    source_data_s3_result = S3Result(bucket='dpt-delivery-data', client_options={'endpoint_url': os.getenv('MINIO_ENDPOINT_URL'), 'aws_access_key_id': os.getenv('MINIO_ACCESS_KEY'), 'aws_secret_access_key': os.getenv('MINIO_SECRET_KEY')})
+    source_data_s3 = source_data_s3_result.read(location='{}/{}'.format(transformation_job_source_path, transformation_job_source_file))
+    # TODO: Zum Testen zunächst Pfad über Prefect-Parameter übergeben (z.B. transformation_job_source_path='provider/81d11682372940519a82bd229daa68d3/delivery/29d7cd5736174a65a8f8c9097793d57e', transformation_job_source_file='DE_1983_repository_prefix_test.zip').
+    #   später Provider-, Delivery- und Revision-ID an Prefect übergeben und den S3-Pfad an dieser Stelle zusammensetzen.
+    source_data_s3_value = source_data_s3.value
 
-        ftp_listdir = []
-        try:
-            ftp_listdir = ftp.nlst()
-        except ftplib.error_perm:
-            # Exception bei leerem Ordner abfangen.
-            pass
+    temp_dir_uuid = str(uuid4().hex)
+    temp_dir_path = "temp_dir/{}".format(temp_dir_uuid)
+    os.makedirs(temp_dir_path)
 
-        if transformation_job_source_file in ftp_listdir:
-            temp_dir_uuid = str(uuid4().hex)
-            temp_dir_path = "temp_dir/{}".format(temp_dir_uuid)
-            os.makedirs(temp_dir_path)
+    with open("{}/{}".format(temp_dir_path, transformation_job_source_file), "wb") as output_file:
+        output_file.write(source_data_s3_value)
+        # TODO: prüfen, ob es funktioniert. Ansonsten ggf. direkt mit boto3 arbeiten.
 
-            with open("{}/{}".format(temp_dir_path, transformation_job_source_file), "wb") as output_file:
-                ftp.retrbinary('RETR ' + transformation_job_source_file, output_file.write, 1024)
-                # ftp.sendcmd("RNFR {}".format(transformation_job_source_file))
-                # ftp.sendcmd("RNTO {}.processed".format(
-                #     transformation_job_source_file))  # Endung .processed anfügen, damit hochgeladene Lieferungen nicht mehrfach prozessiert werden.
-
-            source_path = {"source_path": transformation_job_source_path, "temp_dir": temp_dir_path,
-                           "root_path": root_path}
+    source_path = {"source_path": transformation_job_source_path, "temp_dir": temp_dir_path,
+                   "root_path": root_path}
 
     return source_path
 
@@ -279,28 +270,10 @@ def upload_transformation_job_result(transformation_job_result, paths, dpt_insta
 
     shutil.make_archive(transformation_job_result_folder_unique, "zip", transformation_job_result_folder)
 
-    transformation_job_source_path = paths["source_path"]
-    with ftplib.FTP(os.getenv("DDB_FTP_SERVER")) as ftp:
-        ftp.login(user=os.getenv("DDB_FTP_USER"), passwd=os.getenv("DDB_FTP_PWD"))
-        ftp.cwd(transformation_job_source_path)
+    target_data_s3_result = S3Result(bucket='dpt-result-data', client_options={'endpoint_url': os.getenv('MINIO_ENDPOINT_URL'), 'aws_access_key_id': os.getenv('MINIO_ACCESS_KEY'), 'aws_secret_access_key': os.getenv('MINIO_SECRET_KEY')}, location='test.zip')
+    target_data_s3 = target_data_s3_result.write(value_=open(transformation_job_result_file, "rb"))
 
-        # Verzeichnisliste abrufen und prüfen, ob Ordner "processed" zur Ablage der Ergebnisse vorhanden ist.
-        ftp_listdir = []
-        try:
-            ftp_listdir = ftp.nlst()
-        except ftplib.error_perm:
-            # Exception bei leerem Ordner abfangen.
-            pass
-        if "processed" not in ftp_listdir:
-            # Ordner "processed" auf FTP anlegen, wenn noch nicht vorhanden.
-            ftp.mkd("processed")
-
-        ftp.cwd("{}/processed".format(transformation_job_source_path))
-        try:
-            ftp.storbinary("STOR " + transformation_job_result_file, open(transformation_job_result_file, "rb"))
-        except ConnectionResetError as exc:
-            logger.error("Verbindung durch FTP-Server unterbrochen. Die Output-Daten werden im Ordner '{}' belassen, damit diese manuell heruntergeladen werden können.\n{}".format(data_output_path, exc))
-            upload_successful = False
+    # TODO: an Prefect übergeben, unter welchem Pfad die Daten gespeichert werden sollen (Provider-, Delivery- und Revision-ID zur Erzeugung des S3-Pfads im dpt-result-data Bucket, z.B: 'provider/81d11682372940519a82bd229daa68d3/delivery/29d7cd5736174a65a8f8c9097793d57e/revision/e91a665e87c74a308882429ed4e68261/DE_1983.zip')?
 
     return upload_successful
 
