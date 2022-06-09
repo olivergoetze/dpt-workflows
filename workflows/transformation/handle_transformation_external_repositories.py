@@ -32,7 +32,7 @@ def fetch_transformation_job_data(transformation_job_source_path, transformation
     load_dotenv()
     root_path = os.path.abspath(".")
 
-    source_data_s3_result = S3Result(bucket='dpt-delivery-data', client_options={'endpoint_url': os.getenv('MINIO_ENDPOINT_URL'), 'aws_access_key_id': os.getenv('MINIO_ACCESS_KEY'), 'aws_secret_access_key': os.getenv('MINIO_SECRET_KEY')})
+    source_data_s3_result = S3Result(bucket='dpt-delivery-data')
     source_data_s3 = source_data_s3_result.read(location='{}/{}'.format(transformation_job_source_path, transformation_job_source_file))
     # TODO: Zum Testen zunächst Pfad über Prefect-Parameter übergeben (z.B. transformation_job_source_path='provider/81d11682372940519a82bd229daa68d3/delivery/29d7cd5736174a65a8f8c9097793d57e', transformation_job_source_file='DE_1983_repository_prefix_test.zip').
     #   später Provider-, Delivery- und Revision-ID an Prefect übergeben und den S3-Pfad an dieser Stelle zusammensetzen.
