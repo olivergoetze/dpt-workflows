@@ -51,3 +51,8 @@ spec:
                 secretKeyRef:
                   name: minio-credentials
                   key: MINIO_SECRET_KEY
+            - name: PREFECT__CONTEXT__SECRETS__AWS_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: PREFECT__CONTEXT__SECRETS__AWS_CREDENTIALS

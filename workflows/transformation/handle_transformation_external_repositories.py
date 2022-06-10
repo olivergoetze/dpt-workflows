@@ -7,15 +7,12 @@ from prefect import Client
 from prefect.executors import LocalDaskExecutor
 from prefect.run_configs import KubernetesRun
 from prefect.backend import FlowRunView
-# from prefect.storage import GitHub
 from prefect.storage import S3
-from prefect.engine.results import S3Result
 
 import os
 import sys
 import collections
 import shutil
-import ftplib
 import importlib.util
 from lxml import etree
 from uuid import uuid4
@@ -24,29 +21,34 @@ from dotenv import load_dotenv
 import time
 import subprocess
 import yaml
+import boto3
+from botocore.client import Config
 
 
 @task(name="fetch_transformation_job_data")
-def fetch_transformation_job_data(transformation_job_source_path, transformation_job_source_file):
+def fetch_transformation_job_data(transformation_job_provider_id, transformation_job_delivery_id, transformation_job_source_file):
     """Quelldaten für den Transformations-Job herunterladen und in temporärem Verzeichnis bereitstellen."""
     load_dotenv()
     root_path = os.path.abspath(".")
 
-    source_data_s3_result = S3Result(bucket='dpt-delivery-data')
-    source_data_s3 = source_data_s3_result.read(location='{}/{}'.format(transformation_job_source_path, transformation_job_source_file))
-    # TODO: Zum Testen zunächst Pfad über Prefect-Parameter übergeben (z.B. transformation_job_source_path='provider/81d11682372940519a82bd229daa68d3/delivery/29d7cd5736174a65a8f8c9097793d57e', transformation_job_source_file='DE_1983_repository_prefix_test.zip').
-    #   später Provider-, Delivery- und Revision-ID an Prefect übergeben und den S3-Pfad an dieser Stelle zusammensetzen.
-    source_data_s3_value = source_data_s3.value
+    s3 = boto3.resource('s3',
+                        endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
+                        aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+                        aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+                        config=Config(signature_version='s3v4'),
+                        region_name='us-east-1')
 
     temp_dir_uuid = str(uuid4().hex)
     temp_dir_path = "temp_dir/{}".format(temp_dir_uuid)
     os.makedirs(temp_dir_path)
 
-    with open("{}/{}".format(temp_dir_path, transformation_job_source_file), "wb") as output_file:
-        output_file.write(source_data_s3_value)
-        # TODO: prüfen, ob es funktioniert. Ansonsten ggf. direkt mit boto3 arbeiten.
+    s3_input_file_path = "provider/{}/delivery/{}/{}".format(transformation_job_provider_id, transformation_job_delivery_id, transformation_job_source_file)
+    output_file_path = "{}/{}".format(temp_dir_path, transformation_job_source_file)
+    s3.Bucket("dpt-delivery-data").download_file(
+        s3_input_file_path,
+        output_file_path)
 
-    source_path = {"source_path": transformation_job_source_path, "temp_dir": temp_dir_path,
+    source_path = {"source_path": s3_input_file_path, "temp_dir": temp_dir_path,
                    "root_path": root_path}
 
     return source_path
@@ -252,7 +254,7 @@ def monitor_transformation_run(transformation_job, dpt_instance_path, paths):
             time.sleep(1)
 
 @task(name="upload_transformation_job_result")
-def upload_transformation_job_result(transformation_job_result, paths, dpt_instance_path, transformation_job_data):
+def upload_transformation_job_result(transformation_job_result, paths, dpt_instance_path, transformation_job_data, transformation_job_provider_id, transformation_job_delivery_id, transformation_job_revision_id, transformation_job_process_id):
     """Output-Ordner in FTP-Verzeichnis hochladen."""
     logger = prefect.context.get("logger")
     upload_successful = True
@@ -265,15 +267,19 @@ def upload_transformation_job_result(transformation_job_result, paths, dpt_insta
 
     provider_isil = transformation_job_data["provider"]
     transformation_job_result_folder = provider_isil.replace("-", "_")
-    transformation_job_result_folder_unique = "{}_{}".format(transformation_job_result_folder, str(uuid4().hex)[:8])
-    transformation_job_result_file = "{}.zip".format(transformation_job_result_folder_unique)
+    transformation_job_result_file = "{}.zip".format(transformation_job_result_folder)
 
-    shutil.make_archive(transformation_job_result_folder_unique, "zip", transformation_job_result_folder)
+    shutil.make_archive(transformation_job_result_folder, "zip", transformation_job_result_folder)
 
-    target_data_s3_result = S3Result(bucket='dpt-result-data', client_options={'endpoint_url': os.getenv('MINIO_ENDPOINT_URL'), 'aws_access_key_id': os.getenv('MINIO_ACCESS_KEY'), 'aws_secret_access_key': os.getenv('MINIO_SECRET_KEY')}, location='test.zip')
-    target_data_s3 = target_data_s3_result.write(value_=open(transformation_job_result_file, "rb"))
+    s3 = boto3.resource('s3',
+                        endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
+                        aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+                        aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+                        config=Config(signature_version='s3v4'),
+                        region_name='us-east-1')
 
-    # TODO: an Prefect übergeben, unter welchem Pfad die Daten gespeichert werden sollen (Provider-, Delivery- und Revision-ID zur Erzeugung des S3-Pfads im dpt-result-data Bucket, z.B: 'provider/81d11682372940519a82bd229daa68d3/delivery/29d7cd5736174a65a8f8c9097793d57e/revision/e91a665e87c74a308882429ed4e68261/DE_1983.zip')?
+    s3_output_file_path = "provider/{}/delivery/{}/revision/{}/process/{}/{}".format(transformation_job_provider_id, transformation_job_delivery_id, transformation_job_revision_id, transformation_job_process_id, transformation_job_result_file)
+    s3.Bucket("dpt-result-data").upload_file(transformation_job_result_file, s3_output_file_path)
 
     return upload_successful
 
@@ -303,10 +309,13 @@ with Flow(name="DPT-Transformation Testing External Repositories", executor=Loca
     dpt_source = Parameter("dpt_source", default="dpt_core")
     provider_script_repositories = Parameter("provider_script_repositories", default=["olivergoetze/dpt-provider-scripts"])
     python_dependencies = Parameter("additional_python_dependencies", default=[])
-    transformation_job_source_path = Parameter("transformation_job_source_path", default="/Fachstelle_Archiv/datapreparationcloud")
     transformation_job_source_file = Parameter("transformation_job_source_file", default="DE_1983.zip")
+    transformation_job_provider_id = Parameter("transformation_job_provider_id", default="81d11682372940519a82bd229daa68d3")
+    transformation_job_delivery_id = Parameter("transformation_job_delivery_id", default="29d7cd5736174a65a8f8c9097793d57e")
+    transformation_job_revision_id = Parameter("transformation_job_revision_id", default="e91a665e87c74a308882429ed4e68261")
+    transformation_job_process_id = Parameter("transformation_job_process_id", default="3441be74-3e0f-4068-aee8-2b6f0f6c1202")
 
-    path_dict = fetch_transformation_job_data(transformation_job_source_path, transformation_job_source_file)
+    path_dict = fetch_transformation_job_data(transformation_job_provider_id, transformation_job_delivery_id, transformation_job_source_file)
     working_dir = prepare_working_dir(path_dict)
     dpt_instance = prepare_dpt_instance(working_dir, dpt_source)
     dpt_instance_update_result = update_dpt_instance(dpt_instance, path_dict)
@@ -315,21 +324,20 @@ with Flow(name="DPT-Transformation Testing External Repositories", executor=Loca
     transformation_job_data = get_transformation_job_data(dpt_instance, path_dict, provider_script_repo_fetch_result)
     transformation_result = handle_transformation_run(transformation_job_data, dpt_instance)
     monitoring_result = monitor_transformation_run(transformation_job_data, dpt_instance, path_dict)
-    transformation_result_upload = upload_transformation_job_result(transformation_result, path_dict, dpt_instance, transformation_job_data)
+    transformation_result_upload = upload_transformation_job_result(transformation_result, path_dict, dpt_instance, transformation_job_data, transformation_job_provider_id, transformation_job_delivery_id, transformation_job_revision_id, transformation_job_process_id)
 
     cleanup_dir = cleanup_working_dir(transformation_result_upload, path_dict, working_dir)
 
 
-# flow.storage = GitHub(repo="olivergoetze/dpt-workflows", path="workflows/transformation/handle_transformation_external_repositories.py", access_token_secret="GITHUB_STORAGE_ACCESS_TOKEN")
 load_dotenv()
-flow.storage = S3(bucket="dpt-prefect-flow-storage", key="workflows/transformation/handle_transformation_external_repositories.py", stored_as_script=True, client_options={'endpoint_url': os.getenv('MINIO_ENDPOINT_URL'), 'aws_access_key_id': os.getenv('MINIO_ACCESS_KEY'), 'aws_secret_access_key': os.getenv('MINIO_SECRET_KEY')})
+flow.storage = S3(bucket="dpt-prefect-flow-storage", key="workflows/transformation/handle_transformation_external_repositories.py", stored_as_script=True, client_options={'endpoint_url': os.getenv('MINIO_ENDPOINT_URL')})
 
 job_template_file_path = "config/k8s_job_template_handle_transformation_external_repositories.yaml"
 if os.path.isfile(job_template_file_path):
     with open(job_template_file_path) as f:
         job_template = yaml.safe_load(f)
 else:
-    job_template = {'apiVersion': 'batch/v1', 'kind': 'Job', 'spec': {'template': {'spec': {'containers': [{'name': 'flow', 'env': [{'name': 'DDB_FTP_SERVER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_SERVER'}}}, {'name': 'DDB_FTP_USER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_USER'}}}, {'name': 'DDB_FTP_PWD', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_PWD'}}}, {'name': 'GITHUB_REPO_USER', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_USER'}}}, {'name': 'GITHUB_REPO_TOKEN', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_TOKEN'}}}, {'name': 'PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN'}}}, {'name': 'MINIO_ENDPOINT_URL', 'valueFrom': {'secretKeyRef': {'name': 'minio-credentials', 'key': 'MINIO_ENDPOINT_URL'}}}, {'name': 'MINIO_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': 'minio-credentials', 'key': 'MINIO_ACCESS_KEY'}}}, {'name': 'MINIO_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': 'minio-credentials', 'key': 'MINIO_SECRET_KEY'}}}]}]}}}}
+    job_template = {'apiVersion': 'batch/v1', 'kind': 'Job', 'spec': {'template': {'spec': {'containers': [{'name': 'flow', 'env': [{'name': 'DDB_FTP_SERVER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_SERVER'}}}, {'name': 'DDB_FTP_USER', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_USER'}}}, {'name': 'DDB_FTP_PWD', 'valueFrom': {'secretKeyRef': {'name': 'ddbftp-credentials', 'key': 'DDB_FTP_PWD'}}}, {'name': 'GITHUB_REPO_USER', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_USER'}}}, {'name': 'GITHUB_REPO_TOKEN', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'GITHUB_REPO_TOKEN'}}}, {'name': 'PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN', 'valueFrom': {'secretKeyRef': {'name': 'github-repo-credentials', 'key': 'PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN'}}}, {'name': 'MINIO_ENDPOINT_URL', 'valueFrom': {'secretKeyRef': {'name': 'minio-credentials', 'key': 'MINIO_ENDPOINT_URL'}}}, {'name': 'MINIO_ACCESS_KEY', 'valueFrom': {'secretKeyRef': {'name': 'minio-credentials', 'key': 'MINIO_ACCESS_KEY'}}}, {'name': 'MINIO_SECRET_KEY', 'valueFrom': {'secretKeyRef': {'name': 'minio-credentials', 'key': 'MINIO_SECRET_KEY'}}}, {'name': 'PREFECT__CONTEXT__SECRETS__AWS_CREDENTIALS', 'valueFrom': {'secretKeyRef': {'name': 'minio-credentials', 'key': 'PREFECT__CONTEXT__SECRETS__AWS_CREDENTIALS'}}}]}]}}}}
 flow.run_config = KubernetesRun(image="ghcr.io/olivergoetze/dpt-core:latest", job_template=job_template)
 
 flow.set_reference_tasks([transformation_result_upload])
