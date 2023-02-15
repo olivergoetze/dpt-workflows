@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+spec:
+  template:
+    spec:
+      containers:
+        - name: flow
+          env:
+            - name: GITHUB_REPO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: github-repo-credentials
+                  key: GITHUB_REPO_USER
+            - name: GITHUB_REPO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-repo-credentials
+                  key: GITHUB_REPO_TOKEN
+            - name: PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-repo-credentials
+                  key: PREFECT__CONTEXT__SECRETS__GITHUB_STORAGE_ACCESS_TOKEN
+            - name: MINIO_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ENDPOINT_URL
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_SECRET_KEY
+            - name: PREFECT__CONTEXT__SECRETS__AWS_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: PREFECT__CONTEXT__SECRETS__AWS_CREDENTIALS
