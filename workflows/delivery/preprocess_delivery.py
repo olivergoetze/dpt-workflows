@@ -8,6 +8,7 @@ from prefect.run_configs import KubernetesRun
 from prefect.storage import S3
 
 import os
+import ast
 import pathlib
 import ftplib
 import paramiko
@@ -23,6 +24,8 @@ from botocore.client import Config
 @task(name="collect_delivery_data")
 def collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path):
     delivery_padding_directory = "{}/{}/{}".format(storage_padding_path, delivery_upload_process_id, str(uuid4()))
+
+    file_structure = ast.literal_eval(file_structure)
 
     if upload_method == "browser":
         for file_item in file_structure["files"]:
