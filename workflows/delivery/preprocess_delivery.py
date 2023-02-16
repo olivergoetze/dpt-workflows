@@ -23,9 +23,7 @@ from botocore.client import Config
 
 @task(name="collect_delivery_data")
 def collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path):
-    delivery_padding_directory = "{}/{}/{}".format(storage_padding_path, delivery_upload_process_id, str(uuid4()))
-    if not os.path.isdir(delivery_padding_directory):
-        os.makedirs(delivery_padding_directory)
+    delivery_padding_directory = "{}/{}".format(storage_padding_path, delivery_upload_process_id)
 
     file_structure = ast.literal_eval(file_structure)
 
@@ -35,7 +33,7 @@ def collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_ser
             original_file_name = file_item["original_file_name"]
 
             target_file_path = "{}/{}".format(delivery_padding_directory, original_file_name)
-            shutil.copyfile(file_path, target_file_path)
+            os.rename(file_path, target_file_path)
 
             if file_item["is_zip_file"]:
                 if file_item["extract_zip_file"]:
