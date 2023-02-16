@@ -21,7 +21,7 @@ from botocore.client import Config
 
 
 @task(name="collect_delivery_data")
-def collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path):
+def collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path):
     delivery_padding_directory = "{}/{}/{}".format(storage_padding_path, delivery_upload_process_id, str(uuid4()))
 
     if upload_method == "browser":
@@ -48,7 +48,7 @@ def collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_ser
             ftp_file_path_parts = ftp_file_path_parts[-2:]
             ftp_file_path = "/{}".format("/".join(ftp_file_path_parts))
 
-        if is_sftp_capable:
+        if ftp_server_is_sftp_capable:
             transport = paramiko.Transport((ftp_server_url, ftp_server_port))
             transport.connect(username=ftp_server_username, password=ftp_server_password)
             sftp = paramiko.SFTPClient.from_transport(transport)
@@ -106,11 +106,11 @@ with Flow(name="Preprocess Delivery", executor=LocalDaskExecutor()) as flow:
     ftp_server_port = Parameter("ftp_server_port")
     ftp_server_username = Parameter("ftp_server_username")
     ftp_server_password = Parameter("ftp_server_password")
-    is_sftp_capable = Parameter("is_sftp_capable")
+    ftp_server_is_sftp_capable = Parameter("ftp_server_is_sftp_capable")
     ftp_path = Parameter("ftp_path")
     storage_padding_path = Parameter("storage_padding_path")
 
-    delivery_data = collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path)
+    delivery_data = collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path)
     store_data_result = store_delivery_data_in_s3(delivery_data, provider_id, delivery_id)
 
 
