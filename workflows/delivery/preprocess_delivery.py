@@ -54,6 +54,8 @@ def collect_delivery_data(external_delivery_upload_complete, upload_method, file
     logger = prefect.context.get("logger")
 
     delivery_padding_directory = "{}/{}".format("/prefect-delivery-data-padding", delivery_upload_process_id)
+    if not os.path.isdir(delivery_padding_directory):
+        os.makedirs(delivery_padding_directory)
 
     file_structure = ast.literal_eval(file_structure)
 
