@@ -9,10 +9,10 @@ from prefect.storage import S3
 
 import os
 import ast
+import time
 import pathlib
 import ftplib
 import paramiko
-from uuid import uuid4
 from zipfile import ZipFile
 from dotenv import load_dotenv
 import shutil
@@ -21,25 +21,80 @@ import boto3
 from botocore.client import Config
 
 
+@task(name="wait_for_delivery_upload")
+def wait_for_external_delivery_upload(delivery_upload_process_id):
+    logger = prefect.context.get("logger")
+
+    s3 = boto3.resource('s3',
+                        endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
+                        aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+                        aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+                        config=Config(signature_version='s3v4'),
+                        region_name='us-east-1')
+    bucket = s3.Bucket("dpt-delivery-padding")
+    key = "{}/.upload_complete".format(delivery_upload_process_id)
+
+    external_delivery_upload_complete = False
+    logger.info("Waiting for external Delivery Upload to complete.")
+
+    while not external_delivery_upload_complete:
+        objs = list(bucket.objects.filter(Prefix=key))
+        if any([w.key == key for w in objs]):
+            external_delivery_upload_complete = True
+            logger.info("External Delivery Upload for delivery_upload_process_id {} complete.".format(delivery_upload_process_id))
+        else:
+            time.sleep(1)
+
+    external_delivery_upload_complete = True
+    return external_delivery_upload_complete
+
+
 @task(name="collect_delivery_data")
-def collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path):
-    delivery_padding_directory = "{}/{}".format(storage_padding_path, delivery_upload_process_id)
+def collect_delivery_data(external_delivery_upload_complete, upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id):
+    logger = prefect.context.get("logger")
+
+    delivery_padding_directory = "{}/{}".format("/prefect-delivery-data-padding", delivery_upload_process_id)
 
     file_structure = ast.literal_eval(file_structure)
 
     if upload_method == "browser":
+        # tar-Datei aus Bucket dpt-delivery-padding in Padding-PV herunterladen und entpacken
+        s3 = boto3.resource('s3',
+                            endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
+                            aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+                            aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+                            config=Config(signature_version='s3v4'),
+                            region_name='us-east-1')
+
+        s3_input_file_path = "{}/{}.zip".format(delivery_upload_process_id, delivery_id)
+        output_file_path = "{}/{}.zip".format(delivery_padding_directory, delivery_id)
+        s3.Bucket("dpt-delivery-padding").download_file(s3_input_file_path, output_file_path)
+
+        temporary_folder_path = "{}/{}".format(delivery_padding_directory, "tmp")
+        if not os.path.isdir(temporary_folder_path):
+            os.makedirs(temporary_folder_path)
+
+        with ZipFile(output_file_path) as zipObj:
+            zipObj.extractall(temporary_folder_path)
+
+        os.remove(output_file_path)
+
         for file_item in file_structure["files"]:
-            file_path = file_item["file_path"]
+            temporary_file_name = file_item["temporary_file_name"]
             original_file_name = file_item["original_file_name"]
 
+            temporary_file_path = "{}/{}".format(temporary_folder_path, temporary_file_name)
             target_file_path = "{}/{}".format(delivery_padding_directory, original_file_name)
-            os.rename(file_path, target_file_path)
+
+            os.rename(temporary_file_path, target_file_path)
 
             if file_item["is_zip_file"]:
                 if file_item["extract_zip_file"]:
                     with ZipFile(target_file_path) as zipObj:
                         zipObj.extractall(delivery_padding_directory)
-                    os.remove(target_file_path)
+                    shutil.rmtree(target_file_path)
+
+        shutil.rmtree(temporary_folder_path)
     elif upload_method == "ftp":
         ftp_full_path = pathlib.Path(ftp_path)
         ftp_file_name = str(ftp_full_path.name)
@@ -98,6 +153,43 @@ def store_delivery_data_in_s3(delivery_data, provider_id, delivery_id):
     return upload_successful
 
 
+@task(name="cleanup_delivery_padding_prefix")
+def cleanup_delivery_padding_prefix(store_data_result, delivery_upload_process_id):
+    s3 = boto3.client('s3',
+                        endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
+                        aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+                        aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+                        config=Config(signature_version='s3v4'),
+                        region_name='us-east-1')
+    paginator = s3.get_paginator('list_objects_v2')
+    prefix = delivery_upload_process_id
+    pages = paginator.paginate(Bucket='dpt-delivery-padding', Prefix=prefix)
+
+    delete_objects = dict(Objects=[])
+    for item in pages.search('Contents'):
+        if item is not None:
+            delete_objects['Objects'].append(dict(Key=item['Key']))
+
+        if len(delete_objects['Objects']) >= 1000:
+            s3.delete_objects(Bucket='dpt-delivery-padding', Delete=delete_objects)
+            delete_objects = dict(Objects=[])
+
+    if len(delete_objects['Objects']):
+        s3.delete_objects(Bucket='dpt-delivery-padding', Delete=delete_objects)
+
+    cleanup_successful = True
+    return cleanup_successful
+
+
+@task(name="cleanup_delivery_padding_directory")
+def cleanup_delivery_padding_directory(cleanup_prefix_result, delivery_upload_process_id):
+    delivery_padding_directory = "{}/{}".format("/prefect-delivery-data-padding", delivery_upload_process_id)
+    shutil.rmtree(delivery_padding_directory)
+
+    cleanup_successful = True
+    return cleanup_successful
+
+
 with Flow(name="Preprocess Delivery", executor=LocalDaskExecutor()) as flow:
     delivery_upload_process_id = Parameter("delivery_upload_process_id")
     provider_id = Parameter("provider_id")
@@ -111,10 +203,12 @@ with Flow(name="Preprocess Delivery", executor=LocalDaskExecutor()) as flow:
     ftp_server_password = Parameter("ftp_server_password")
     ftp_server_is_sftp_capable = Parameter("ftp_server_is_sftp_capable")
     ftp_path = Parameter("ftp_path")
-    storage_padding_path = Parameter("storage_padding_path")
 
-    delivery_data = collect_delivery_data(upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id, storage_padding_path)
+    external_delivery_upload_complete = wait_for_external_delivery_upload(delivery_upload_process_id)
+    delivery_data = collect_delivery_data(external_delivery_upload_complete, upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id)
     store_data_result = store_delivery_data_in_s3(delivery_data, provider_id, delivery_id)
+    cleanup_prefix_result = cleanup_delivery_padding_prefix(store_data_result, delivery_upload_process_id)
+    cleanup_directory_result = cleanup_delivery_padding_directory(cleanup_prefix_result, delivery_upload_process_id)
 
 
 load_dotenv()
