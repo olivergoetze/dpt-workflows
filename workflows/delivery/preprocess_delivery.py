@@ -15,6 +15,7 @@ import ftplib
 import paramiko
 from zipfile import ZipFile
 from dotenv import load_dotenv
+from uuid import uuid4
 import shutil
 import yaml
 import boto3
@@ -51,11 +52,12 @@ def wait_for_external_delivery_upload(delivery_upload_process_id):
 
 @task(name="collect_delivery_data")
 def collect_delivery_data(external_delivery_upload_complete, upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id):
-    logger = prefect.context.get("logger")
-
     delivery_padding_directory = "{}/{}".format("/prefect-delivery-data-padding", delivery_upload_process_id)
+    temporary_folder_path = "{}/{}".format(delivery_padding_directory, "tmp")
     if not os.path.isdir(delivery_padding_directory):
         os.makedirs(delivery_padding_directory)
+    if not os.path.isdir(temporary_folder_path):
+        os.makedirs(temporary_folder_path)
 
     file_structure = ast.literal_eval(file_structure)
 
@@ -69,15 +71,15 @@ def collect_delivery_data(external_delivery_upload_complete, upload_method, file
                             region_name='us-east-1')
 
         s3_input_file_path = "{}/{}.zip".format(delivery_upload_process_id, delivery_id)
-        output_file_path = "{}/{}.zip".format(delivery_padding_directory, delivery_id)
+        output_file_path = "{}/{}.zip".format(temporary_folder_path, delivery_id)
         s3.Bucket("dpt-delivery-padding").download_file(s3_input_file_path, output_file_path)
 
-        temporary_folder_path = "{}/{}".format(delivery_padding_directory, "tmp")
-        if not os.path.isdir(temporary_folder_path):
-            os.makedirs(temporary_folder_path)
+        unzipped_folder_path = "{}/{}".format(temporary_folder_path, "unzipped")
+        if not os.path.isdir(unzipped_folder_path):
+            os.makedirs(unzipped_folder_path)
 
         with ZipFile(output_file_path) as zipObj:
-            zipObj.extractall(temporary_folder_path)
+            zipObj.extractall(unzipped_folder_path)
 
         os.remove(output_file_path)
 
@@ -85,18 +87,20 @@ def collect_delivery_data(external_delivery_upload_complete, upload_method, file
             temporary_file_name = file_item["temporary_file_name"]
             original_file_name = file_item["original_file_name"]
 
-            temporary_file_path = "{}/{}".format(temporary_folder_path, temporary_file_name)
-            target_file_path = "{}/{}".format(delivery_padding_directory, original_file_name)
+            temporary_file_path = "{}/{}".format(unzipped_folder_path, temporary_file_name)
+            target_file_path = "{}/{}".format(temporary_folder_path, original_file_name)
 
             os.rename(temporary_file_path, target_file_path)
 
             if file_item["is_zip_file"]:
                 if file_item["extract_zip_file"]:
-                    with ZipFile(target_file_path) as zipObj:
-                        zipObj.extractall(delivery_padding_directory)
-                    shutil.rmtree(target_file_path)
+                    zip_file_randomized_path = "{}_{}".format(target_file_path, str(uuid4()))
+                    os.rename(target_file_path, zip_file_randomized_path)  # Absicherung für den Fall, dass in der zip-Datei eine weitere zip-Datei enthalten ist, die denselben Namen hat. Die zu extrahierende zip-Datei wird umbenannt (z.B. 'binaries.zip_ca5cc6f8-9792-4fbf-99c4-7b277ab4cb87'). Dadurch werden Konflikte vermieden, wenn sich in der zu extrahierenden zip-Datei wiederum eine Datei mit den Namen "binaries.zip" befindet.
+                    with ZipFile(zip_file_randomized_path) as zipObj:
+                        zipObj.extractall(temporary_folder_path)
+                    os.remove(zip_file_randomized_path)
 
-        shutil.rmtree(temporary_folder_path)
+        shutil.rmtree(unzipped_folder_path)
     elif upload_method == "ftp":
         ftp_full_path = pathlib.Path(ftp_path)
         ftp_file_name = str(ftp_full_path.name)
@@ -128,7 +132,7 @@ def collect_delivery_data(external_delivery_upload_complete, upload_method, file
 
     delivery_file_name = "{}".format(delivery_id)
     if upload_method == "browser":
-        shutil.make_archive(os.path.join(delivery_padding_directory, delivery_file_name), "zip", root_dir=delivery_padding_directory)
+        shutil.make_archive(os.path.join(delivery_padding_directory, delivery_file_name), "zip", root_dir=temporary_folder_path)
     else:
         os.rename("{}/{}".format(delivery_padding_directory, ftp_file_name), "{}/{}.zip".format(delivery_padding_directory, delivery_file_name))
 
@@ -155,7 +159,7 @@ def store_delivery_data_in_s3(delivery_data, provider_id, delivery_id):
     return upload_successful
 
 
-@task(name="cleanup_delivery_padding_prefix")
+@task(name="cleanup_delivery_padding_prefix", trigger=prefect.triggers.always_run)
 def cleanup_delivery_padding_prefix(store_data_result, delivery_upload_process_id):
     s3 = boto3.client('s3',
                         endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
@@ -183,7 +187,7 @@ def cleanup_delivery_padding_prefix(store_data_result, delivery_upload_process_i
     return cleanup_successful
 
 
-@task(name="cleanup_delivery_padding_directory")
+@task(name="cleanup_delivery_padding_directory", trigger=prefect.triggers.always_run)
 def cleanup_delivery_padding_directory(cleanup_prefix_result, delivery_upload_process_id):
     delivery_padding_directory = "{}/{}".format("/prefect-delivery-data-padding", delivery_upload_process_id)
     shutil.rmtree(delivery_padding_directory)
@@ -210,7 +214,7 @@ with Flow(name="Preprocess Delivery", executor=LocalDaskExecutor()) as flow:
     delivery_data = collect_delivery_data(external_delivery_upload_complete, upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id)
     store_data_result = store_delivery_data_in_s3(delivery_data, provider_id, delivery_id)
     cleanup_prefix_result = cleanup_delivery_padding_prefix(store_data_result, delivery_upload_process_id)
-    cleanup_directory_result = cleanup_delivery_padding_directory(cleanup_prefix_result, delivery_upload_process_id)
+    cleanup_directory_result = cleanup_delivery_padding_directory(store_data_result, delivery_upload_process_id)
 
 
 load_dotenv()
