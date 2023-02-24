@@ -23,28 +23,31 @@ from botocore.client import Config
 
 
 @task(name="wait_for_delivery_upload")
-def wait_for_external_delivery_upload(delivery_upload_process_id):
+def wait_for_external_delivery_upload(delivery_upload_process_id, upload_method):
     logger = prefect.context.get("logger")
 
-    s3 = boto3.resource('s3',
-                        endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
-                        aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
-                        aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
-                        config=Config(signature_version='s3v4'),
-                        region_name='us-east-1')
-    bucket = s3.Bucket("dpt-delivery-padding")
-    key = "{}/.upload_complete".format(delivery_upload_process_id)
+    if upload_method == "browser":
+        s3 = boto3.resource('s3',
+                            endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
+                            aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+                            aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+                            config=Config(signature_version='s3v4'),
+                            region_name='us-east-1')
+        bucket = s3.Bucket("dpt-delivery-padding")
+        key = "{}/.upload_complete".format(delivery_upload_process_id)
 
-    external_delivery_upload_complete = False
-    logger.info("Waiting for external Delivery Upload to complete.")
+        external_delivery_upload_complete = False
+        logger.info("Waiting for external Delivery Upload to complete.")
 
-    while not external_delivery_upload_complete:
-        objs = list(bucket.objects.filter(Prefix=key))
-        if any([w.key == key for w in objs]):
-            external_delivery_upload_complete = True
-            logger.info("External Delivery Upload for delivery_upload_process_id {} complete.".format(delivery_upload_process_id))
-        else:
-            time.sleep(1)
+        while not external_delivery_upload_complete:
+            objs = list(bucket.objects.filter(Prefix=key))
+            if any([w.key == key for w in objs]):
+                external_delivery_upload_complete = True
+                logger.info("External Delivery Upload for delivery_upload_process_id {} complete.".format(delivery_upload_process_id))
+            else:
+                time.sleep(1)
+    elif upload_method == "ftp":
+        logger.info("Skip waiting for external Delivery Upload - Delivery will be directly fetched from FTP Server.")
 
     external_delivery_upload_complete = True
     return external_delivery_upload_complete
@@ -59,10 +62,10 @@ def collect_delivery_data(external_delivery_upload_complete, upload_method, file
     if not os.path.isdir(temporary_folder_path):
         os.makedirs(temporary_folder_path)
 
-    file_structure = ast.literal_eval(file_structure)
-
     if upload_method == "browser":
         # tar-Datei aus Bucket dpt-delivery-padding in Padding-PV herunterladen und entpacken
+        file_structure = ast.literal_eval(file_structure)
+
         s3 = boto3.resource('s3',
                             endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
                             aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
@@ -109,11 +112,11 @@ def collect_delivery_data(external_delivery_upload_complete, upload_method, file
         # Abprüfen, ob relativer FTP-Pfad geliefert. Falls nicht, via Pathlib das Protokoll und den Host entfernen
         ftp_file_path_parts = ftp_full_path.parent.parts
         if ftp_file_path_parts[0] in tuple(["ftp:", "sftp:"]):
-            ftp_file_path_parts = ftp_file_path_parts[-2:]
+            ftp_file_path_parts = ftp_file_path_parts[2:]
             ftp_file_path = "/{}".format("/".join(ftp_file_path_parts))
 
-        if ftp_server_is_sftp_capable:
-            transport = paramiko.Transport((ftp_server_url, ftp_server_port))
+        if ast.literal_eval(ftp_server_is_sftp_capable) is True:
+            transport = paramiko.Transport((ftp_server_url, int(ftp_server_port)))
             transport.connect(username=ftp_server_username, password=ftp_server_password)
             sftp = paramiko.SFTPClient.from_transport(transport)
             sftp.get("{}/{}".format(ftp_file_path, ftp_file_name), "{}/{}".format(delivery_padding_directory, ftp_file_name))
@@ -122,7 +125,7 @@ def collect_delivery_data(external_delivery_upload_complete, upload_method, file
             transport.close()
         else:
             ftp = ftplib.FTP()
-            ftp.connect(ftp_server_url, ftp_server_port)
+            ftp.connect(ftp_server_url, int(ftp_server_port))
             ftp.login(user=ftp_server_username, passwd=ftp_server_password)
             ftp.cwd(ftp_file_path)
 
@@ -210,7 +213,7 @@ with Flow(name="Preprocess Delivery", executor=LocalDaskExecutor()) as flow:
     ftp_server_is_sftp_capable = Parameter("ftp_server_is_sftp_capable")
     ftp_path = Parameter("ftp_path")
 
-    external_delivery_upload_complete = wait_for_external_delivery_upload(delivery_upload_process_id)
+    external_delivery_upload_complete = wait_for_external_delivery_upload(delivery_upload_process_id, upload_method)
     delivery_data = collect_delivery_data(external_delivery_upload_complete, upload_method, file_structure, ftp_server_url, ftp_server_port, ftp_server_username, ftp_server_password, ftp_server_is_sftp_capable, ftp_path, delivery_upload_process_id, delivery_id)
     store_data_result = store_delivery_data_in_s3(delivery_data, provider_id, delivery_id)
     cleanup_prefix_result = cleanup_delivery_padding_prefix(store_data_result, delivery_upload_process_id)
